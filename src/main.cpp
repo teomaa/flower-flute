@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <esp_wifi.h>
+#include <esp_pm.h>
 
 #define CONSOLE_IP "192.168.1.2"
 #define CONSOLE_PORT 4210
@@ -13,11 +15,29 @@ IPAddress local_ip(192, 168, 1, 1);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
+uint8_t lastPacked = 0xFF; // impossible initial value to force first send
+unsigned long lastSendTime = 0;
+
 void setup()
 {
   Serial.begin(115200);
+
+  // Lock CPU to max frequency — prevent dynamic frequency scaling
+  esp_pm_config_esp32_t pm_config = {
+    .max_freq_mhz = 240,
+    .min_freq_mhz = 240,
+    .light_sleep_enable = false
+  };
+  esp_pm_configure(&pm_config);
+
   WiFi.softAP(ssid, password);
   WiFi.softAPConfig(local_ip, gateway, subnet);
+
+  // Disable all WiFi power saving
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
+  // Max WiFi TX power for reliable, fast transmission
+  esp_wifi_set_max_tx_power(78);
 }
 
 void loop()
@@ -33,9 +53,15 @@ void loop()
   uint8_t packed = (flute1 << 0) | (flute2 << 1) | (flute3 << 2)
                  | (flute4 << 3) | (modeChange << 4) | (mouthPiece << 5);
 
-  Udp.beginPacket(CONSOLE_IP, CONSOLE_PORT);
-  Udp.write(packed);
-  Udp.endPacket();
+  unsigned long now = millis();
+  // Send immediately on change, or every 200ms as a heartbeat
+  if (packed != lastPacked || now - lastSendTime >= 200) {
+    Udp.beginPacket(CONSOLE_IP, CONSOLE_PORT);
+    Udp.write(packed);
+    Udp.endPacket();
+    lastPacked = packed;
+    lastSendTime = now;
+  }
 
-  delay(1000);
+  delay(1); // minimal yield to WiFi stack without triggering sleep
 }
