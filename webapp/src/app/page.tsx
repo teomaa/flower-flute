@@ -21,7 +21,7 @@ export default function Home() {
       <FlowerVis isPlaying={pins.mouthPiece} noteIndex={noteIndex} />
 
       <div className="relative min-h-screen bg-transparent text-white font-mono p-8" style={{ zIndex: 1 }}>
-        <h1 className="text-2xl mb-6">Flower Flute</h1>
+        <h1 className="text-2xl mb-6">Flower Flute!</h1>
 
         <div className="mb-4 flex items-center gap-3">
           <span
