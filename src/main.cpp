@@ -47,7 +47,7 @@ void loop()
   bool flute3 = touchRead(T3) < TOUCH_THRESHOLD;  // GPIO 15
   bool flute4 = touchRead(T2) < TOUCH_THRESHOLD;  // GPIO 2
   bool modeChange = touchRead(T9) < TOUCH_THRESHOLD; // GPIO 32
-  bool mouthPiece = touchRead(T7) < TOUCH_THRESHOLD; // GPIO 27
+  bool mouthPiece = touchRead(T8) < TOUCH_THRESHOLD; // GPIO 33
 
   // Pack 6 booleans into a single byte: bits 0-5
   uint8_t packed = (flute1 << 0) | (flute2 << 1) | (flute3 << 2)

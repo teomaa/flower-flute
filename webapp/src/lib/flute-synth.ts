@@ -1,26 +1,54 @@
-// Raw Web Audio API flute synth — no Tone.js scheduler overhead.
+// Raw Web Audio API synth with switchable Flute/Clarinet modes.
 // Oscillators run continuously; sound is controlled by gain only (instant on/off).
+
+export type SynthMode = "flute" | "clarinet";
+
+interface ModePreset {
+  partials: number[];
+  filterFreq: number;
+  attackTime: number;
+  noiseLevel: number;
+  noiseSustain: number;
+}
+
+const PRESETS: Record<SynthMode, ModePreset> = {
+  flute: {
+    partials: [1, 0.4, 0.1, 0.02, 0, 0, 0],
+    filterFreq: 3500,
+    attackTime: 0.03,
+    noiseLevel: 0.08,
+    noiseSustain: 0.015,
+  },
+  clarinet: {
+    // Odd harmonics only — hollow, woody sound
+    partials: [1, 0, 0.6, 0, 0.3, 0, 0.1],
+    filterFreq: 2500,
+    attackTime: 0.01,
+    noiseLevel: 0.03,
+    noiseSustain: 0.005,
+  },
+};
+
+const NUM_PARTIALS = 7;
 
 export class FluteSynth {
   private ctx: AudioContext;
   private oscillators: OscillatorNode[] = [];
-  private gains: GainNode[] = [];
+  private partialGains: GainNode[] = [];
   private masterGain: GainNode;
   private noiseGain: GainNode;
   private noiseSource: AudioBufferSourceNode | null = null;
   private filter: BiquadFilterNode;
   private isPlaying = false;
   private currentFreq = 0;
-
-  // Harmonic weights for flute timbre
-  private static PARTIALS = [1, 0.4, 0.1, 0.02];
+  private mode: SynthMode = "flute";
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: "interactive" });
 
     this.filter = this.ctx.createBiquadFilter();
     this.filter.type = "lowpass";
-    this.filter.frequency.value = 3500;
+    this.filter.frequency.value = PRESETS.flute.filterFreq;
     this.filter.Q.value = 0.5;
     this.filter.connect(this.ctx.destination);
 
@@ -28,21 +56,21 @@ export class FluteSynth {
     this.masterGain.gain.value = 0;
     this.masterGain.connect(this.filter);
 
-    // Create persistent oscillators for each partial
-    for (let i = 0; i < FluteSynth.PARTIALS.length; i++) {
+    // Create persistent oscillators for all partials
+    for (let i = 0; i < NUM_PARTIALS; i++) {
       const osc = this.ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.value = 440 * (i + 1);
 
       const gain = this.ctx.createGain();
-      gain.gain.value = FluteSynth.PARTIALS[i];
+      gain.gain.value = PRESETS.flute.partials[i];
 
       osc.connect(gain);
       gain.connect(this.masterGain);
       osc.start();
 
       this.oscillators.push(osc);
-      this.gains.push(gain);
+      this.partialGains.push(gain);
     }
 
     // Persistent noise for breathiness
@@ -67,10 +95,31 @@ export class FluteSynth {
     this.noiseSource = source;
   }
 
+  setMode(mode: SynthMode) {
+    if (mode === this.mode) return;
+    this.mode = mode;
+
+    const preset = PRESETS[mode];
+    const now = this.ctx.currentTime;
+
+    // Update partial gains
+    for (let i = 0; i < NUM_PARTIALS; i++) {
+      this.partialGains[i].gain.setValueAtTime(preset.partials[i], now);
+    }
+
+    // Update filter
+    this.filter.frequency.setValueAtTime(preset.filterFreq, now);
+  }
+
+  getMode(): SynthMode {
+    return this.mode;
+  }
+
   noteOn(frequency: number) {
     if (this.isPlaying && this.currentFreq === frequency) return;
 
     const now = this.ctx.currentTime;
+    const preset = PRESETS[this.mode];
 
     // Set oscillator frequencies immediately
     for (let i = 0; i < this.oscillators.length; i++) {
@@ -81,15 +130,13 @@ export class FluteSynth {
     }
 
     if (!this.isPlaying) {
-      // Attack: ramp gain up fast
       this.masterGain.gain.cancelScheduledValues(now);
       this.masterGain.gain.setValueAtTime(0, now);
-      this.masterGain.gain.linearRampToValueAtTime(0.5, now + 0.03);
+      this.masterGain.gain.linearRampToValueAtTime(0.5, now + preset.attackTime);
 
-      // Brief breath noise on attack
       this.noiseGain.gain.cancelScheduledValues(now);
-      this.noiseGain.gain.setValueAtTime(0.08, now);
-      this.noiseGain.gain.linearRampToValueAtTime(0.015, now + 0.08);
+      this.noiseGain.gain.setValueAtTime(preset.noiseLevel, now);
+      this.noiseGain.gain.linearRampToValueAtTime(preset.noiseSustain, now + 0.08);
 
       this.isPlaying = true;
     }

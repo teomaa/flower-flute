@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { FluteSynth } from "./flute-synth";
+import { FluteSynth, SynthMode } from "./flute-synth";
 import { NOTES } from "./notes";
 
 export interface PinState {
@@ -17,6 +17,7 @@ export interface FluteState {
   pins: PinState;
   noteIndex: number;
   noteName: string;
+  modeName: SynthMode;
   isConnected: boolean;
   audioStarted: boolean;
   startAudio: () => Promise<void>;
@@ -51,13 +52,20 @@ function getNoteIndex(pins: PinState): number {
   );
 }
 
+const MODES: SynthMode[] = ["flute", "clarinet"];
+const MODE_CHANGE_DEBOUNCE_MS = 500;
+
 export function useFlute(): FluteState {
   const [pins, setPins] = useState<PinState>(DEFAULT_PINS);
   const [isConnected, setIsConnected] = useState(false);
   const [audioStarted, setAudioStarted] = useState(false);
+  const [modeName, setModeName] = useState<SynthMode>("flute");
   const synthRef = useRef<FluteSynth | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const lastMessageTime = useRef<number>(0);
+  const prevModeChange = useRef<boolean>(false);
+  const lastModeChangeTime = useRef<number>(0);
+  const modeIndexRef = useRef<number>(0);
 
   const startAudio = useCallback(async () => {
     if (audioStarted) return;
@@ -80,21 +88,36 @@ export function useFlute(): FluteState {
       };
       ws.onmessage = (event) => {
         const { packed } = JSON.parse(event.data);
-        lastMessageTime.current = Date.now();
+        const now = Date.now();
+        lastMessageTime.current = now;
         setIsConnected(true);
 
         const newPins = decodePacked(packed);
         setPins(newPins);
 
-        // Trigger sound immediately, don't wait for React re-render
         const synth = synthRef.current;
-        if (synth) {
-          const noteIndex = getNoteIndex(newPins);
-          if (newPins.mouthPiece) {
-            synth.noteOn(NOTES[noteIndex].frequency);
-          } else {
-            synth.noteOff();
-          }
+        if (!synth) return;
+
+        // Mode change: rising edge detection + 500ms debounce
+        if (
+          newPins.modeChange &&
+          !prevModeChange.current &&
+          now - lastModeChangeTime.current >= MODE_CHANGE_DEBOUNCE_MS
+        ) {
+          lastModeChangeTime.current = now;
+          modeIndexRef.current = (modeIndexRef.current + 1) % MODES.length;
+          const newMode = MODES[modeIndexRef.current];
+          synth.setMode(newMode);
+          setModeName(newMode);
+        }
+        prevModeChange.current = newPins.modeChange;
+
+        // Trigger sound immediately, don't wait for React re-render
+        const noteIndex = getNoteIndex(newPins);
+        if (newPins.mouthPiece) {
+          synth.noteOn(NOTES[noteIndex].frequency);
+        } else {
+          synth.noteOff();
         }
       };
     }
@@ -121,6 +144,7 @@ export function useFlute(): FluteState {
     pins,
     noteIndex,
     noteName: NOTES[noteIndex].name,
+    modeName,
     isConnected,
     audioStarted,
     startAudio,
